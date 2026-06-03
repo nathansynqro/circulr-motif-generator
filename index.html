@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Circulr — Motif Generator</title>
+<link rel="icon" type="image/png" href="public/favicon-circulr.png">
 <style>
   :root {
     --sidebar-w: 280px;
@@ -81,19 +82,10 @@
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
-  .brand-name {
-    font-size: 15px;
-    font-weight: 800;
-    letter-spacing: -.02em;
-    color: var(--text);
-    line-height: 1;
-  }
-  .brand-sub {
-    font-size: 10px;
-    color: var(--muted);
-    margin-top: 3px;
-    text-transform: uppercase;
-    letter-spacing: .1em;
+  .brand img {
+    height: 28px;
+    width: auto;
+    display: block;
   }
 
   /* ── Controls scroll area ── */
@@ -245,8 +237,7 @@
   <!-- Sidebar (left on desktop, bottom on mobile) -->
   <aside class="sidebar">
     <header class="brand">
-      <div class="brand-name">Circulr</div>
-      <div class="brand-sub">Motif Generator</div>
+      <img src="public/logo-circulr.svg" alt="Circulr">
     </header>
 
     <div class="controls">
