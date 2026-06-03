@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #fff; font-family: system-ui, sans-serif; }
+  canvas { display: block; cursor: crosshair; touch-action: none; }
+  .controls { width: 100%; padding: 12px 16px 20px; background: #fff; }
+  .section-title { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #999; padding: 10px 0 3px; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: .5px solid rgba(0,0,0,.1); }
+  .row label { font-size: 11px; color: #666; width: 150px; flex-shrink: 0; }
+  .row .val { font-size: 11px; font-weight: 700; width: 36px; text-align: right; color: #333; background: rgba(0,0,0,.07); padding: 1px 4px; border-radius: 3px; }
+  input[type="range"] { flex: 1; -webkit-appearance: none; appearance: none; background: transparent; }
+  input[type="range"]::-webkit-slider-runnable-track { height: 3px; background: #ccc; border-radius: 2px; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: #56C1FF; margin-top: -5px; cursor: pointer; }
+  input[type="range"]::-moz-range-track { height: 3px; background: #ccc; border-radius: 2px; }
+  input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: #56C1FF; border: none; cursor: pointer; }
+  .swatch { width: 20px; height: 20px; border-radius: 50%; cursor: pointer; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); transition: box-shadow .1s; }
+  .swatch.selected { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #333; }
+  .swatches { display: flex; gap: 5px; flex-wrap: wrap; }
+  .btn { font-size: 11px; padding: 5px 16px; border-radius: 100px; border: .5px solid rgba(0,0,0,.15); background: rgba(0,0,0,.04); cursor: pointer; color: #444; }
+  .btns { display: flex; gap: 8px; padding-top: 12px; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="controls">
+  <div class="section-title">Couleurs</div>
+  <div class="row"><label>Fond</label><div class="swatches" id="bgSwatches"></div></div>
+  <div class="row"><label>Formes</label><div class="swatches" id="fgSwatches"></div></div>
+  <div class="section-title">Champ</div>
+  <div class="row"><label>Densité cercles</label><input type="range" id="density" min="1" max="5" step="1" value="3"><span class="val" id="vDensity">3</span></div>
+  <div class="row"><label>Réaction / amplitude</label><input type="range" id="react" min="0" max="6" step="0.01" value="3"><span class="val" id="vReact">3.00</span></div>
+  <div class="row"><label>Fréquence ondes</label><input type="range" id="freq" min="0" max="0.4" step="0.01" value="0.2"><span class="val" id="vFreq">0.20</span></div>
+  <div class="row"><label>Atténuation</label><input type="range" id="decay" min="0.05" max="0.25" step="0.01" value="0.15"><span class="val" id="vDecay">0.15</span></div>
+  <div class="row"><label>Douceur glow</label><input type="range" id="sigma" min="0.1" max="0.5" step="0.01" value="0.3"><span class="val" id="vSigma">0.30</span></div>
+  <div class="row"><label>Contraste</label><input type="range" id="intensity" min="0.5" max="11.5" step="0.1" value="6"><span class="val" id="vIntensity">6.0</span></div>
+  <div class="row"><label>Saturation</label><input type="range" id="saturation" min="0" max="2" step="0.05" value="1"><span class="val" id="vSaturation">1.00</span></div>
+  <div class="row"><label>Smooth (inertie)</label><input type="range" id="smooth" min="0" max="0.98" step="0.01" value="0"><span class="val" id="vSmooth">0</span></div>
+  <div class="section-title">Animation</div>
+  <div class="row"><label>Vitesse rotation</label><input type="range" id="rotation" min="0" max="4" step="0.05" value="0"><span class="val" id="vRotation">0</span></div>
+  <div class="row"><label>Vitesse ondes</label><input type="range" id="speed" min="0" max="3" step="0.05" value="0.6"><span class="val" id="vSpeed">0.60</span></div>
+  <div class="btns">
+    <button class="btn" id="playBtn">Pause</button>
+    <button class="btn" id="exportBtn">Export PNG ↗</button>
+  </div>
+</div>
+<script>
+const COLORS=[{hex:"#F7F6F6",label:"Blanc"},{hex:"#56C1FF",label:"Bleu"},{hex:"#D7D6CA",label:"Gris"},{hex:"#E897EE",label:"Violet"},{hex:"#E5CA66",label:"Jaune"},{hex:"#52C155",label:"Vert"}];
+function h2r(hex){return[parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16)];}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function saturate(r,g,b,s){const lum=0.299*r+0.587*g+0.114*b;return[clamp(lum+(r-lum)*s,0,255),clamp(lum+(g-lum)*s,0,255),clamp(lum+(b-lum)*s,0,255)];}
+let bgIdx=0,fgIdx=3,bgColor=h2r(COLORS[0].hex),fgColor=h2r(COLORS[3].hex),playing=true,animId=null;
+const state={tgtPx:0,tgtPy:0,curPx:0,curPy:0,phase:0,rotAngle:0,lastTs:0,drag:false};
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function resize(){const w=Math.min(window.innerWidth,1400);cv.width=w;cv.height=Math.round(w*788/1400);cv.style.width=w+'px';cv.style.height=cv.height+'px';}
+resize();
+function getParam(id){return parseFloat(document.getElementById(id).value);}
+function getRings(W,H,ex,ey,p){const n=Math.round(p.density),maxR=Math.min(W,H)/2*0.92,step=maxR/n,pox=ex*W*0.5,poy=ey*H*0.5,rings=[];for(let i=0;i<n;i++){const t=i/(n-1||1),r=(i+1)*step,factor=p.react*Math.pow(1-t*0.6,1.2);rings.push({cx:W/2+pox*factor,cy:H/2+poy*factor,r});}return rings;}
+function fieldAt(x,y,rings,ph,p){const n=rings.length;let wave=0,glow=0;for(let k=0;k<n;k++){const{cx,cy,r}=rings[k],d=Math.sqrt((x-cx)**2+(y-cy)**2)-r;wave+=Math.cos(d*p.freq*0.22+ph)*Math.exp(-Math.abs(d)*p.decay*0.07);const sig=p.sigma*Math.max(r*0.35,3);glow+=Math.exp(-d*d/(2*sig*sig));}return(wave/n)*0.55+(glow/n)*0.55;}
+function renderFrame(ts){const W=cv.width,H=cv.height,p={density:getParam('density'),react:getParam('react'),freq:getParam('freq'),decay:getParam('decay'),sigma:getParam('sigma'),intensity:getParam('intensity'),saturation:getParam('saturation'),smooth:getParam('smooth'),rotation:getParam('rotation'),speed:getParam('speed')};const dt=Math.min(ts-(state.lastTs||ts),50);state.lastTs=ts;const lf=p.smooth>=0.98?0.002:clamp(1-Math.pow(p.smooth,dt*0.06),0.002,1);state.curPx+=(state.tgtPx-state.curPx)*lf;state.curPy+=(state.tgtPy-state.curPy)*lf;state.rotAngle+=p.rotation*dt*0.001;state.phase+=p.speed*dt*0.002;let ex=state.curPx,ey=state.curPy;if(p.rotation>0){const rr=Math.max(Math.sqrt(ex*ex+ey*ey),0.05),a=Math.atan2(ey,ex)+state.rotAngle;ex=rr*Math.cos(a);ey=rr*Math.sin(a);}const OSW=Math.round(W*0.5),OSH=Math.round(H*0.5),rings=getRings(OSW,OSH,ex,ey,p),id=ctx.createImageData(OSW,OSH),data=id.data;for(let y=0;y<OSH;y++){for(let x=0;x<OSW;x++){const idx=(y*OSW+x)*4;let f=fieldAt(x,y,rings,state.phase,p);f=Math.tanh(f*p.intensity);const t=(f+1)*0.5;let pr=bgColor[0]+(fgColor[0]-bgColor[0])*t,pg=bgColor[1]+(fgColor[1]-bgColor[1])*t,pb=bgColor[2]+(fgColor[2]-bgColor[2])*t;if(p.saturation!==1){[pr,pg,pb]=saturate(pr,pg,pb,p.saturation);}data[idx]=Math.round(pr);data[idx+1]=Math.round(pg);data[idx+2]=Math.round(pb);data[idx+3]=255;}}const tmp=document.createElement('canvas');tmp.width=OSW;tmp.height=OSH;tmp.getContext('2d').putImageData(id,0,0);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(tmp,0,0,W,H);animId=requestAnimationFrame(renderFrame);}
+function startAnim(){state.lastTs=0;animId=requestAnimationFrame(renderFrame);}
+function stopAnim(){if(animId)cancelAnimationFrame(animId);}
+startAnim();
+const sliderDefs={density:{step:1},react:{step:0.01},freq:{step:0.01},decay:{step:0.01},sigma:{step:0.01},intensity:{step:0.1},saturation:{step:0.05},smooth:{step:0.01},rotation:{step:0.05},speed:{step:0.05}};
+Object.entries(sliderDefs).forEach(([id,{step}])=>{const el=document.getElementById(id),key='v'+id.charAt(0).toUpperCase()+id.slice(1),vEl=document.getElementById(key);el.addEventListener('input',()=>{const v=parseFloat(el.value);vEl.textContent=step<0.1?v.toFixed(2):step<1?v.toFixed(1):Math.round(v);});});
+function buildSwatches(containerId,currentIdx,onClick){const c=document.getElementById(containerId);c.innerHTML='';COLORS.forEach((col,i)=>{const d=document.createElement('div');d.className='swatch'+(i===currentIdx?' selected':'');d.style.background=col.hex;d.title=col.label;d.addEventListener('click',()=>onClick(i));c.appendChild(d);});}
+function rebuildBg(i){bgIdx=i;bgColor=h2r(COLORS[i].hex);buildSwatches('bgSwatches',bgIdx,rebuildBg);}
+function rebuildFg(i){fgIdx=i;fgColor=h2r(COLORS[i].hex);buildSwatches('fgSwatches',fgIdx,rebuildFg);}
+buildSwatches('bgSwatches',bgIdx,rebuildBg);
+buildSwatches('fgSwatches',fgIdx,rebuildFg);
+document.getElementById('playBtn').addEventListener('click',()=>{playing=!playing;document.getElementById('playBtn').textContent=playing?'Pause':'Play';playing?startAnim():stopAnim();});
+document.getElementById('exportBtn').addEventListener('click',()=>{const a=document.createElement('a');a.download='circulr-motif.png';a.href=cv.toDataURL('image/png');a.click();});
+function handlePointer(clientX,clientY){const rect=cv.getBoundingClientRect(),x=((clientX-rect.left)*(cv.width/rect.width)-cv.width/2)/(cv.width/2),y=((clientY-rect.top)*(cv.height/rect.height)-cv.height/2)/(cv.height/2);state.tgtPx=clamp(x,-1.4,1.4);state.tgtPy=clamp(y,-1.4,1.4);}
+cv.addEventListener('mousedown',e=>{state.drag=true;handlePointer(e.clientX,e.clientY);});
+cv.addEventListener('mousemove',e=>{if(state.drag)handlePointer(e.clientX,e.clientY);});
+cv.addEventListener('mouseup',()=>state.drag=false);
+cv.addEventListener('mouseleave',()=>state.drag=false);
+cv.addEventListener('touchstart',e=>{e.preventDefault();state.drag=true;handlePointer(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+cv.addEventListener('touchmove',e=>{e.preventDefault();if(state.drag)handlePointer(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+cv.addEventListener('touchend',()=>state.drag=false);
+window.addEventListener('resize',resize);
+</script>
+</body>
+</html>
