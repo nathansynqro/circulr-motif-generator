@@ -125,11 +125,23 @@
   .val {
     font-size: 11px;
     font-weight: 600;
-    width: 36px;
+    min-width: 36px;
     text-align: right;
     color: var(--text);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
+    border-radius: 4px;
+    padding: 1px 3px;
+    cursor: text;
+    transition: background .1s, color .1s, outline .1s;
+    white-space: nowrap;
+    user-select: text;
+  }
+  .val:focus {
+    background: rgba(86,193,255,.13);
+    outline: 1.5px solid rgba(86,193,255,.5);
+    color: #0088cc;
+    text-align: left;
   }
   input[type="range"] {
     width: 72px;
@@ -375,9 +387,37 @@ Object.entries(sliderDefs).forEach(([id,{step}])=>{
   const el=document.getElementById(id),
         key='v'+id.charAt(0).toUpperCase()+id.slice(1),
         vEl=document.getElementById(key);
+  const fmt=v=>step<0.1?parseFloat(v).toFixed(2):step<1?parseFloat(v).toFixed(1):String(Math.round(v));
+  const min=parseFloat(el.min),max=parseFloat(el.max);
+
+  // Slider → display (skip if user is typing in the val field)
   el.addEventListener('input',()=>{
-    const v=parseFloat(el.value);
-    vEl.textContent=step<0.1?v.toFixed(2):step<1?v.toFixed(1):Math.round(v);
+    if(document.activeElement!==vEl) vEl.textContent=fmt(el.value);
+  });
+
+  // Make the value badge directly editable
+  vEl.contentEditable='true';
+  vEl.spellcheck=false;
+
+  vEl.addEventListener('focus',()=>{
+    const r=document.createRange();r.selectNodeContents(vEl);
+    const s=window.getSelection();s.removeAllRanges();s.addRange(r);
+  });
+
+  const commit=()=>{
+    let v=parseFloat(vEl.textContent.replace(',','.'));
+    if(isNaN(v))v=parseFloat(el.value);
+    v=Math.round(clamp(v,min,max)/step)*step;
+    el.value=v;
+    vEl.textContent=fmt(v);
+  };
+
+  vEl.addEventListener('blur',commit);
+  vEl.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();commit();vEl.blur();}
+    if(e.key==='Escape'){vEl.textContent=fmt(el.value);vEl.blur();}
+    // Block non-numeric characters
+    if(e.key.length===1&&!/[\d.,\-]/.test(e.key))e.preventDefault();
   });
 });
 
