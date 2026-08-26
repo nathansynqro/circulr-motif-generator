@@ -212,13 +212,51 @@
     box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text);
   }
 
+  /* ── Select (formats vidéo) ── */
+  .row select {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 4px;
+    max-width: 122px;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+
   /* ── Footer actions ── */
   .actions {
     padding: 14px 20px 20px;
     display: flex;
+    flex-direction: column;
     gap: 8px;
     border-top: 1px solid var(--border);
     flex-shrink: 0;
+  }
+  .actions-row {
+    display: flex;
+    gap: 8px;
+  }
+  .progress {
+    height: 2px;
+    background: #e0e0e0;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform .12s linear;
+  }
+  .hint {
+    font-size: 10px;
+    line-height: 1.45;
+    color: var(--muted);
   }
   .btn {
     flex: 1;
@@ -241,6 +279,9 @@
     border-color: var(--text);
   }
   .btn.primary:hover { background: #2a2a2a; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn:disabled:hover { background: var(--bg); }
+  .btn.primary:disabled:hover { background: var(--text); }
 </style>
 </head>
 <body>
@@ -270,11 +311,27 @@
       <div class="section-title">Animation</div>
       <div class="row"><label>Vitesse rotation</label><input type="range" id="rotation" min="0" max="4" step="0.05" value="0"><span class="val" id="vRotation">0</span></div>
       <div class="row"><label>Vitesse ondes</label><input type="range" id="speed" min="0" max="3" step="0.05" value="0.6"><span class="val" id="vSpeed">0.60</span></div>
+
+      <div class="section-title">Vidéo</div>
+      <div class="row"><label>Format</label><select id="vidFormat">
+        <option value="square">Carré · 1080</option>
+        <option value="landscape">Paysage · 1920×1080</option>
+        <option value="portrait">Portrait · 1080×1920</option>
+      </select></div>
+      <div class="row"><label>Images / s</label><select id="vidFps">
+        <option value="30">30 fps</option>
+        <option value="60">60 fps</option>
+      </select></div>
     </div>
 
     <div class="actions">
-      <button class="btn" id="playBtn">Pause</button>
-      <button class="btn primary" id="exportBtn">Export PNG ↗</button>
+      <div class="actions-row">
+        <button class="btn" id="playBtn">Pause</button>
+        <button class="btn" id="exportBtn">PNG ↗</button>
+      </div>
+      <button class="btn primary" id="mp4Btn">Export MP4 · 10 s</button>
+      <div class="progress" id="mp4Progress" hidden><i id="mp4Bar"></i></div>
+      <p class="hint" id="mp4Hint" hidden></p>
     </div>
   </aside>
 
@@ -334,31 +391,34 @@ function fieldAt(x,y,rings,ph,p){
   return(wave/n)*0.55+(glow/n)*0.55;
 }
 
-function renderFrame(ts){
-  const W=cv.width,H=cv.height,
-        p={density:getParam('density'),react:getParam('react'),freq:getParam('freq'),
-           decay:getParam('decay'),sigma:getParam('sigma'),intensity:getParam('intensity'),
-           saturation:getParam('saturation'),smooth:getParam('smooth'),
-           rotation:getParam('rotation'),speed:getParam('speed')};
-  const dt=Math.min(ts-(state.lastTs||ts),50);
-  state.lastTs=ts;
-  const lf=p.smooth>=0.98?0.002:clamp(1-Math.pow(p.smooth,dt*0.06),0.002,1);
-  state.curPx+=(state.tgtPx-state.curPx)*lf;
-  state.curPy+=(state.tgtPy-state.curPy)*lf;
-  state.rotAngle+=p.rotation*dt*0.001;
-  state.phase+=p.speed*dt*0.002;
-  let ex=state.curPx,ey=state.curPy;
-  if(p.rotation>0){
-    const rr=Math.max(Math.sqrt(ex*ex+ey*ey),0.05),a=Math.atan2(ey,ex)+state.rotAngle;
-    ex=rr*Math.cos(a);ey=rr*Math.sin(a);
-  }
-  const OSW=Math.round(W*0.5),OSH=Math.round(H*0.5),
+const PARAM_IDS=['density','react','freq','decay','sigma','intensity','saturation','smooth','rotation','speed'];
+function readParams(){const p={};for(const id of PARAM_IDS)p[id]=getParam(id);return p;}
+
+// Rotation d'orbite appliquée à la position du pointeur.
+function orbit(px,py,angle){
+  if(!angle)return[px,py];
+  const r=Math.max(Math.sqrt(px*px+py*py),0.05),a=Math.atan2(py,px)+angle;
+  return[r*Math.cos(a),r*Math.sin(a)];
+}
+
+// Le champ est calculé en demi-résolution puis upscalé : c'est ce qui produit le glow.
+let scratch=null;
+function scratchCtx(w,h){
+  if(!scratch)scratch=document.createElement('canvas');
+  if(scratch.width!==w||scratch.height!==h){scratch.width=w;scratch.height=h;}
+  return scratch.getContext('2d');
+}
+
+// Rendu pur : mêmes entrées → même image. C'est ce qui rend l'export offline possible.
+function paintField(target,W,H,p,ex,ey,phase){
+  const OSW=Math.max(Math.round(W*0.5),1),OSH=Math.max(Math.round(H*0.5),1),
         rings=getRings(OSW,OSH,ex,ey,p),
-        id=ctx.createImageData(OSW,OSH),data=id.data;
+        sctx=scratchCtx(OSW,OSH),
+        id=sctx.createImageData(OSW,OSH),data=id.data;
   for(let y=0;y<OSH;y++){
     for(let x=0;x<OSW;x++){
       const idx=(y*OSW+x)*4;
-      let f=fieldAt(x,y,rings,state.phase,p);
+      let f=fieldAt(x,y,rings,phase,p);
       f=Math.tanh(f*p.intensity);
       const t=(f+1)*0.5;
       let pr=bgColor[0]+(fgColor[0]-bgColor[0])*t,
@@ -368,11 +428,26 @@ function renderFrame(ts){
       data[idx]=Math.round(pr);data[idx+1]=Math.round(pg);data[idx+2]=Math.round(pb);data[idx+3]=255;
     }
   }
-  const tmp=document.createElement('canvas');
-  tmp.width=OSW;tmp.height=OSH;
-  tmp.getContext('2d').putImageData(id,0,0);
-  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
-  ctx.drawImage(tmp,0,0,W,H);
+  sctx.putImageData(id,0,0);
+  target.imageSmoothingEnabled=true;target.imageSmoothingQuality='high';
+  target.drawImage(scratch,0,0,W,H);
+}
+
+// Fait avancer l'état d'une durée dt (ms). Partagé par l'aperçu temps réel et l'export.
+function advance(st,p,dt){
+  const lf=p.smooth>=0.98?0.002:clamp(1-Math.pow(p.smooth,dt*0.06),0.002,1);
+  st.curPx+=(st.tgtPx-st.curPx)*lf;
+  st.curPy+=(st.tgtPy-st.curPy)*lf;
+  st.rotAngle+=p.rotation*dt*0.001;
+  st.phase+=p.speed*dt*0.002;
+  return orbit(st.curPx,st.curPy,p.rotation>0?st.rotAngle:0);
+}
+
+function renderFrame(ts){
+  const p=readParams(),dt=Math.min(ts-(state.lastTs||ts),50);
+  state.lastTs=ts;
+  const[ex,ey]=advance(state,p,dt);
+  paintField(ctx,cv.width,cv.height,p,ex,ey,state.phase);
   animId=requestAnimationFrame(renderFrame);
 }
 
@@ -461,5 +536,7 @@ cv.addEventListener('touchmove',e=>{e.preventDefault();if(state.drag)handlePoint
 cv.addEventListener('touchend',()=>state.drag=false);
 window.addEventListener('resize',resize);
 </script>
+<script src="assets/mp4-muxer.js"></script>
+<script src="assets/mp4-export.js"></script>
 </body>
 </html>
